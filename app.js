@@ -12,7 +12,7 @@ const fs = require('fs');
 
 // const url = 'https://www.wsj.com'
 // const url = 'https://en.wikipedia.org/wiki/Machine_learning'
-const url = 'https://github.com/openai'
+const url = 'https://www.amazon.in/'
 // const url = 'https://www.amazon.com/'
 
 // Size of the browser viewport and final images
@@ -58,18 +58,18 @@ function drawRect(canvas, x, y, w, h, text, color) {
     ctx.globalAlpha = 1.0;
 
     // Text
-    if (text){
+    if (text) {
         ctx.font = '12px Arial';
         ctx.fillText(text, x, y);
     }
 }
 
-function saveCanvas(canvas, savePath){
+function saveCanvas(canvas, savePath) {
     const buffer = canvas.toBuffer('image/png')
     fs.writeFileSync(savePath, buffer)
 }
 
-function clipViewport(canvas, viewportHeight, index, save=false, savePath=''){
+function clipViewport(canvas, viewportHeight, index, save = false, savePath = '') {
     let context = canvas.getContext('2d')
     let data = context.getImageData(0, viewportHeight * index, canvas.width, viewportHeight)
     const canvasViewport = createCanvas(canvas.width, viewportHeight)
@@ -82,7 +82,7 @@ function clipViewport(canvas, viewportHeight, index, save=false, savePath=''){
     return buffer
 }
 
-function drawSegments(canvas, segmentGroups, save=false, savePath=''){
+function drawSegments(canvas, segmentGroups, save = false, savePath = '') {
     let offset = 0
     for (let segments of segmentGroups) {
         for (let segment of segments) {
@@ -91,7 +91,13 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
             let description = segment.description
             let color = COLORS[segment.label]
             let text = Object.keys(LABELS)[segment.label]
-            drawRect(canvas, bbox.x, bbox.y + offset, bbox.width, bbox.height, text, color)
+            let clickable = segment.isClickable
+
+            if (clickable) {
+                drawRect(canvas, bbox.x, bbox.y + offset, bbox.width, bbox.height, text, '#f0f0f0')
+            } else {
+                drawRect(canvas, bbox.x, bbox.y + offset, bbox.width, bbox.height, text, color)
+            }
         }
         offset += viewportHeight
     }
@@ -100,14 +106,23 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 }
 
 (async () => {
-    const browser = await chromium.launch({headless: true})
-    // const browser = await chromium.launch({headless: false, devtools: true})
+    // const browser = await chromium.launch({headless: true})
+    const launchOptions = {
+        headless: false,
+        executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // For Windows
+    }
+    // const browser = await chromium.launch({ headless: false, devtools: true, channel: 'chrome' })
+    // const browser = await chromium.launchPersistentContext(userDataDir = 'C:\\Users\\USER\\AppData\\Local\\Google\\Chrome\\User Data\\Default')
+    const browser = await chromium.launch(launchOptions)
     const page = await browser.newPage()
+    // const page = await browser.pages[0]
+    // console.log((await browser).pages)
 
     // sanitize url for a file path by replacing periods and slashes
     const imgPathBase = 'screenshots/' + url.replace(/(^\w+:|^)\/\//, '').replace(/\//g, '_').replace(/\./g, '_') + '/'
+    console.log(imgPathBase)
 
-    await page.setViewportSize({width: viewportWidth, height: viewportHeight})
+    await page.setViewportSize({ width: viewportWidth, height: viewportHeight })
     await page.goto(url)
 
     // Seems this was necessary for fonts and stuff, otherwise sizes gets messed up
@@ -119,28 +134,28 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
         class Segment {
             // Leaf node segment of "semantic content"
-            constructor(el, offset=0){
+            constructor(el, offset = 0) {
                 this.el = el
                 this.bbox = this.getBoundingBox(el)
                 this.label = this.getLabel(el)
                 this.description = this.getDescription(el)
-                // this.isClickable = this.isClickable(el)
+                this.isClickable = this.isClickable(el)
 
                 if (offset !== 0)
                     this.bbox.y += offset
             }
-            isClickable(el){
-                let hasClickEvent = (el.getAttribute('onclick') != null || el.getAttribute('href') != null)
-                // let hasClickEvent = (window.getEventListeners && window.getEventListeners(el)['click'])
+            isClickable(el) {
+                // let hasClickEvent = (el.getAttribute('onclick') != null || el.getAttribute('href') != null)
+                let hasClickEvent = (window.getEventListeners && window.getEventListeners(el)['click'])
                 if (hasClickEvent) return true
                 else if (el.parentElement) hasClickEvent = this.isClickable(el.parentElement)
                 return hasClickEvent
             }
-            getBoundingBox(el){
+            getBoundingBox(el) {
                 // return el.getClientRects()[0]
                 return el.getBoundingClientRect()
             }
-            getLabel(el){
+            getLabel(el) {
                 const data = {
                     'tagName': el.tagName.toUpperCase(),
                     'parentTagName': el.parentElement.tagName.toUpperCase(),
@@ -168,7 +183,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
                 return data.tagName
             }
-            isButton(data){
+            isButton(data) {
                 // Should go after a link check
                 let tagName = data.tagName
                 let classlist = data.classlist
@@ -177,20 +192,20 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                 let isInputButton = tagName == 'INPUT' && data.el.getAttribute('type') == 'button'
                 return tagName == 'BUTTON' || role == 'button' || isInputButton || (tagName == 'A' && (classlist.contains('btn') || classlist.contains('button'))) || hasClickEvent
             }
-            isInput(data){
+            isInput(data) {
                 let tagName = data.tagName
                 return tagName == 'INPUT' || tagName == 'SELECT' || tagName == 'OPTION' || tagName == 'TEXTAREA'
             }
-            isCustom(data){
+            isCustom(data) {
                 let tagName = data.tagName
                 return window.customElements.get(tagName.toLowerCase())
             }
-            isText(data){
+            isText(data) {
                 let tagName = data.tagName
                 let hasText = data.hasText
-                return hasText && (tagName == 'P' || tagName == 'SPAN' || tagName == 'ABBR' || tagName == 'LABEL' || tagName == 'DIV'|| tagName == 'LI')
+                return hasText && (tagName == 'P' || tagName == 'SPAN' || tagName == 'ABBR' || tagName == 'LABEL' || tagName == 'DIV' || tagName == 'LI')
             }
-            isLink(data){
+            isLink(data) {
                 let tagName = data.tagName
                 let parentTagName = data.parentTagName
                 let classlist = data.classlist
@@ -200,7 +215,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                 let citeElement = (tagName == 'CITE')
                 return linkNotButton || parentIsLink || citeElement
             }
-            isHeader(data){
+            isHeader(data) {
                 let tagName = data.tagName
                 let parentTagName = data.parentTagName
                 let hasText = data.hasText
@@ -209,23 +224,23 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                 let isParentHeader = (hasText && (parentTagName == 'H1' || parentTagName == 'H2' || parentTagName == 'H3' || parentTagName == 'H4' || parentTagName == 'H5' || parentTagName == 'H6'))
                 return isHeader || isParentHeader
             }
-            isCode(data){
+            isCode(data) {
                 let tagName = data.tagName
                 return (tagName == 'PRE' || tagName == 'CODE')
             }
-            isQuote(data){
+            isQuote(data) {
                 let tagName = data.tagName
                 return (tagName == 'BLOCKQUOTE')
             }
-            isImage(data){
+            isImage(data) {
                 // todo: check if SVG or IMG
                 let tagName = data.tagName
                 let el = data.el
                 if (tagName == 'IMG' || (tagName == 'SVG' && this.bbox.height * this.bbox.width > minImageArea))
                     return true
                 else {
-                    let isBackgroundImage = (window.getComputedStyle(el).backgroundImage.slice(0,3) == 'url')
-                    if (isBackgroundImage){
+                    let isBackgroundImage = (window.getComputedStyle(el).backgroundImage.slice(0, 3) == 'url')
+                    if (isBackgroundImage) {
                         let url = window.getComputedStyle(el).backgroundImage.slice(4, -1).replace(/"/g, "")
                         let filetype = url.split('.').pop()
                         if (['jpg', 'png', 'gif', 'jpeg', 'webp'].includes(filetype))
@@ -234,19 +249,19 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                     return false
                 }
             }
-            isIcon(data){
+            isIcon(data) {
                 let tagName = data.tagName
                 let el = data.el
                 let isSVG = (tagName == 'SVG')
                 let isSmall = (this.bbox.height * this.bbox.width < minImageArea)
                 let isKBD = (tagName == 'KBD')
 
-                if (isKBD || isSVG && isSmall){
+                if (isKBD || isSVG && isSmall) {
                     return true
                 }
                 else {
-                    let isBackgroundImage = (window.getComputedStyle(el).backgroundImage.slice(0,3) == 'url')
-                    if (isBackgroundImage){
+                    let isBackgroundImage = (window.getComputedStyle(el).backgroundImage.slice(0, 3) == 'url')
+                    if (isBackgroundImage) {
                         let url = window.getComputedStyle(el).backgroundImage.slice(4, -1).replace(/"/g, "")
                         let filetype = url.split('.').pop()
                         if (filetype == 'svg' || filetype.startsWith('data'))
@@ -255,11 +270,11 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                     else return false
                 }
             }
-            isList(data){
+            isList(data) {
                 let tagName = data.tagName
-                return (tagName == 'TABLE' || tagName == 'UL' || tagName == 'OL'|| tagName == 'DL')
+                return (tagName == 'TABLE' || tagName == 'UL' || tagName == 'OL' || tagName == 'DL')
             }
-            getDescription(el){
+            getDescription(el) {
                 if (el.getAttribute('aria-label'))
                     return el.getAttribute('aria-label')
                 if (el.getAttribute('alt'))
@@ -268,7 +283,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                     return el.getAttribute('role')
                 return ''
             }
-            getSegmentFromPoint(viewportHeight){
+            getSegmentFromPoint(viewportHeight) {
                 let centerX = this.bbox.x + this.bbox.width / 2
                 let centerY = this.bbox.y + this.bbox.height / 2
 
@@ -286,7 +301,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
                 return new Segment(el, offset)
             }
-            replaceWithSegmentFromPoint(viewportHeight){
+            replaceWithSegmentFromPoint(viewportHeight) {
                 let segment = this.getSegmentFromPoint(viewportHeight)
                 if (segment === false) return false
 
@@ -296,7 +311,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
                 return true
             }
-            serialize(){
+            serialize() {
                 return {
                     'label': this.label,
                     'bbox': {
@@ -312,46 +327,46 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
         class Segments {
             // Segments is an iterable collection of Segment objects
-            constructor(segments){
+            constructor(segments) {
                 this.segments = segments || []
             }
-            add(segment){
+            add(segment) {
                 this.segments.push(segment)
                 return this
             }
-            sort(){
+            sort() {
                 this.segments.sort((a, b) => a.bbox.y - b.bbox.y)
                 return this
             }
             [Symbol.iterator]() {
                 let index = -1;
-                let data  = this.segments;
+                let data = this.segments;
 
                 return {
                     next: () => ({ value: data[++index], done: !(index in data) })
                 };
             };
-            uniquify(){
+            uniquify() {
                 let uniqueSegments = []
                 let seen = new Set()
-                for (let segment of this.segments){
+                for (let segment of this.segments) {
                     let key = segment.bbox.x + '_' + segment.bbox.y + '_' + segment.bbox.width + '_' + segment.bbox.height
-                    if (!seen.has(key)){
+                    if (!seen.has(key)) {
                         uniqueSegments.push(segment)
                         seen.add(key)
                     }
                 }
                 return new Segments(uniqueSegments)
             }
-            replaceWithSegmentFromPoint(){
-                for (let segment of this.segments){
+            replaceWithSegmentFromPoint() {
+                for (let segment of this.segments) {
                     segment.replaceWithSegmentFromPoint(viewportHeight)
                 }
                 return this
             }
-            serialize(){
+            serialize() {
                 let serializedSegments = []
-                for (let segment of this.segments){
+                for (let segment of this.segments) {
                     serializedSegments.push(segment.serialize())
                 }
                 return serializedSegments
@@ -360,16 +375,16 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
         class SegmentGroups {
             // SegmentGroups is an iterable collection of SegmentGroup objects, broken down by viewport height essentially
-            constructor(segments){
+            constructor(segments) {
                 this.groups = []
                 this.segments = segments || new Segments()
             }
-            group(viewportHeight){
+            group(viewportHeight) {
                 let group = new Segments()
                 let offset = 0
 
-                for (let segment of this.segments){
-                    if (segment.bbox.y < offset + viewportHeight){
+                for (let segment of this.segments) {
+                    if (segment.bbox.y < offset + viewportHeight) {
                         segment.bbox.y -= offset
                         group.add(segment)
                     }
@@ -382,9 +397,9 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                 this.groups.push(group)
                 return this
             }
-            serialize(){
+            serialize() {
                 let serializedSegmentGroups = []
-                for (let group of this.groups){
+                for (let group of this.groups) {
                     serializedSegmentGroups.push(group.serialize())
                 }
                 return serializedSegmentGroups
@@ -405,7 +420,7 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
         while (els.length > 0) {
             let el = els.shift()
 
-            if (el.nodeType == Node.TEXT_NODE && el.textContent.trim() !== ''){
+            if (el.nodeType == Node.TEXT_NODE && el.textContent.trim() !== '') {
                 leaves.add(new Segment(el.parentElement))
                 continue
             }
@@ -428,17 +443,17 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
                 leaves.add(new Segment(el))
 
             // Atomic elements
-            if (leaf_nodes.includes(nodeName)){
+            if (leaf_nodes.includes(nodeName)) {
                 leaves.add(new Segment(el))
                 continue
             }
 
             // Other leaf elements: background images and text
-            if (el.childElementCount == 0){
+            if (el.childElementCount == 0) {
                 if (el.textContent.trim() !== '')
                     leaves.add(new Segment(el))
 
-                if (window.getComputedStyle(el).backgroundImage.slice(0,3) == 'url')
+                if (window.getComputedStyle(el).backgroundImage.slice(0, 3) == 'url')
                     leaves.add(new Segment(el))
 
                 continue
@@ -458,8 +473,8 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
     // Generate full-page screenshot
     let imgPath = imgPathBase + 'full.png'
-    await page.evaluate(() => {window.scrollTo(0, 0)})
-    await page.screenshot({path: imgPath, fullPage: true})
+    await page.evaluate(() => { window.scrollTo(0, 0) })
+    await page.screenshot({ path: imgPath, fullPage: true })
     let img = await loadImage(imgPath)
 
     // Create two canvases for screenshot, one for raw and one for annotated
@@ -473,15 +488,15 @@ function drawSegments(canvas, segmentGroups, save=false, savePath=''){
 
     // Draw bounding boxes on annotated canvas
     let imgPathFullAnnotated = imgPathBase + 'full_annotated.png'
-    drawSegments(canvasAnnotated, segmentGroups, save=true, imgPathFullAnnotated)
+    drawSegments(canvasAnnotated, segmentGroups, save = true, imgPathFullAnnotated)
 
     // Split up full-page screenshot into segments according to full-page scrolling of viewport
-    for (let index in segmentGroups){
+    for (let index in segmentGroups) {
         let imgPath = imgPathBase + index + '.png'
         let imgPathAnnotated = imgPathBase + index + '_annotated.png'
 
-        clipViewport(canvasFull, viewportHeight, index, save=true, savePath=imgPath)
-        clipViewport(canvasAnnotated, viewportHeight, index, save=true, savePath=imgPathAnnotated)
+        clipViewport(canvasFull, viewportHeight, index, save = true, savePath = imgPath)
+        clipViewport(canvasAnnotated, viewportHeight, index, save = true, savePath = imgPathAnnotated)
     }
 
     await browser.close()
